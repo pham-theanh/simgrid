@@ -3,6 +3,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <memory>
 
 #include <set>
 
@@ -29,6 +30,8 @@ public:
   std::set<UnfoldingEvent>::iterator end();
   void insert(UnfoldingEvent);
 
+  void erase(UnfoldingEvent); // adding
+
   bool operator==(const EventSet& other) const;
 
   std::set<UnfoldingEvent> events_;
@@ -36,20 +39,26 @@ public:
 
 class Configuration : public EventSet {
 public:
-  std::set<UnfoldingEvent> maxEvent; // Events recently added to events_
+  EventSet maxEvent; // Events recently added to events_
 
   void getEnabledTransition(std::set<Transition*>* whereto);
-  EventSet generateEvents(Transition* t);
+  //EventSet generateEvents(Transition* t);
+
+  //------------------------------
+
+  EventSet generateEvents (EventSet maxEvent, Transition t, UnfoldingEvent);
+
+  void updateMaxEvent(UnfoldingEvent  e);
 };
 
 class UnfoldingEvent {
 public:
   int id                       = -1;
-  simgrid::mc::State* appState = nullptr;
+  std::unique_ptr<simgrid::mc::State> appState = nullptr;
   Transition* transition; // The last transition made to reach that state
   EventSet causes;        // used to store directed ancestors of event e
 
-  UnfoldingEvent(Transition* t, EventSet causes);
+  UnfoldingEvent(int nb_events, Transition* t, EventSet causes);
 
   bool dependSetEvent(EventSet s1, EventSet s2);
   EventSet getHistory() const;
@@ -66,13 +75,15 @@ public:
 
 class UnfoldingChecker {
   EventSet A, C, D, G, U;
+  unsigned long expandedStatesCount_ = 0;
+  int nb_events = 0; // To generate the unique identifier
 
   static Session& getSession();
 
 private:
-  void explore(EventSet C, EventSet D, EventSet A);
+  void explore(Configuration C, EventSet D, EventSet A,UnfoldingEvent currentEvt);
   void extend(Configuration C, EventSet& enC);
-
+  void remove(UnfoldingEvent e, Configuration C, EventSet D);
   static Session& session;
 };
 }
