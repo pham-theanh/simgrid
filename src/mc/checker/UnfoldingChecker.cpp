@@ -14,9 +14,6 @@ namespace simgrid {
 
     class UnfoldingEvent;
 
-    bool isUnionConfig(EventSet hist1, UnfoldingEvent evt1, EventSet hist2,
-        UnfoldingEvent evt2);
-
     class Transition { // this class can be extended from SimGridMC
     public:
       bool enabled;
@@ -233,9 +230,8 @@ namespace simgrid {
 	return res;
 }*/
 
-
-    EventSet Configuration:: generateEvents(EventSet maxEvent, Transition t,
-        UnfoldingEvent preEvt) {
+    EventSet Configuration::generateEvents(EventSet maxEvent, Transition t, UnfoldingEvent preEvt)
+    {
 
       xbt_assert(t.isDependent(preEvt.transition),
           "This function assume that t depends on the event");
