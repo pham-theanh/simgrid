@@ -133,6 +133,12 @@ namespace simgrid {
      * In the paper, this.isConflict(other) is written "this # other"
      */
     bool UnfoldingEvent::isConflict(UnfoldingEvent otherEvent) {
+      // checking causality relation, if they are in a causality relation return false
+      if (getHistory().contains(otherEvent))
+        return false;
+      UnfoldingEvent evt = new UnfoldingEvent(id, transition, causes);
+      if (otherEvent.getHistory().contains(evt))
+        return false;
 
       /* if 2 event they have the same causes, just check their last transition */
       if (causes == otherEvent.causes)
@@ -181,11 +187,11 @@ namespace simgrid {
 
     // checking conflict relation between one event and one configuration or one history, it used when computing enC
     // there is a better way by checking the event with maximal events in the configuration, (change type of enC )
-    bool UnfoldingEvent::conflictWithConfig(EventSet config) {
+    bool UnfoldingEvent::conflictWithConfig(Configuration config)
+    {
       /* TODO: we don't really need to check the whole config. The maximal event should be enough.
-       * But since that's a set and not a vector, we don't know which is the maximal event anymore...
        */
-      for (auto evt : config)
+      for (auto evt : config.maxEvent)
         if (isConflict(evt))
           return true;
       return false;
@@ -219,17 +225,6 @@ namespace simgrid {
       maxEvent.insert(e);
     }
 
-
-
-
-    /*EventSet Configuration::generateEvents(Transition* t) {
-	EventSet res;
-	 FIXME: Generate one event per transition and per subset of maxEvent
-	THROW_UNIMPLEMENTED
-	;
-	return res;
-}*/
-
     EventSet Configuration::generateEvents(EventSet maxEvent, Transition t, UnfoldingEvent preEvt)
     {
 
@@ -241,8 +236,6 @@ namespace simgrid {
 
       /* suppose isDependent() function 2 transition belong to the same process are dependent (t1->t2->t3 then D(t1,t2) and D(t2,t3) )
        */
-
-
       //at least one event will be create with history(causes) = preEvt
       EventSet causes;
       causes.insert(preEvt);
@@ -259,25 +252,12 @@ namespace simgrid {
       return result;
     }
 
-
-
-
     /* for each event in C, search all enabled transition in the state of that event
- then creating new event based on enabled transition and configuration C*/
+ then creating new event based on the transition and configuration C.maxEvent*/
+
     void UnfoldingChecker::extend(Configuration C, EventSet& enC) {
       std::set<Transition*> enabledTransitions;
-      /*	C.getEnabledTransition(&enabledTransitions);
-	for (auto enabledT : C) {
-		for (auto trans : enabledTransitions) {
-			for (auto newEvent : C.generateEvents(trans)) {
-				U.insert(newEvent);
-				if (not newEvent.conflictWithConfig(C))
-					enC.insert(newEvent);
-			}
-		}
-	}*/
 
-      //--------------------------------------------
       for (auto evt : C.maxEvent) {
 
         evt.appState.getEnabledTransition(&enabledTransitions);
@@ -295,7 +275,6 @@ namespace simgrid {
           }
         }
       }
-      //---------------------------------------------
 
     }
 
@@ -308,10 +287,13 @@ namespace simgrid {
           > (new simgrid::mc::State(this->id));
     }
 
-    void UnfoldingChecker::explore(Configuration C, EventSet D, EventSet A,
-        UnfoldingEvent currentEvt) {
+    void UnfoldingChecker::explore(Configuration C, EventSet D, EventSet A, UnfoldingEvent currentEvt,
+                                   EventSet prev_enC)
+    {
       UnfoldingEvent* e;
-      EventSet enC;
+      EventSet enC = prev_enC;
+      // enC = previous enC + new events that are generate in extend(C,enC)
+
       extend(C, enC);
       if (enC.empty())
         return;
@@ -325,26 +307,22 @@ namespace simgrid {
             std::back_inserter(intersection));
         e = *intersection.begin();
       }
-      // execute event e
-
-      //------------------------------------------
 
       this->getSession().execute(e->transition);
       //currentEvt.execute(e->transition);
       e->appState = std::unique_ptr < simgrid::mc::State
           > (new simgrid::mc::State(++expandedStatesCount_));
-      //------------------------------------------
       // UnfoldingEvent* newEvent = e + e.transition;
       // Config::plus returns a new config with the evt added to the maxEvent
       // Config::minus returns a new config with the evt removed from the set
 
-      explore(C.plus(e), D, A.minus(e), e);
+      explore(C.plus(e), D, A.minus(e), e, enC.minus(e));
       EventSet J, tempJ, dif; // dif = J-C
       J = computeAlt(J, C, D, tempJ, U);
       std::set_difference(J.begin(), J.end(), C.begin(), C.end(),
           std::inserter(dif, dif.end()));
       if (!J.empty())
-        explore(C, D.insert(e), dif, e);
+        explore(C, D.insert(e), dif, e, enC.minus(e));
       remove(e, C, D);
     }
 
@@ -352,8 +330,9 @@ namespace simgrid {
 
     /* this function is used to generate events from a candidate history
      */
-    void genEventFromCandidate(EventSet& result, Transition t,
-        UnfoldingEvent preEvt, EventSet& temp, EventSet& candidateHistory) {
+    void genEventFromCandidate(EventSet& result, Transition* t, UnfoldingEvent preEvt, EventSet& temp,
+                               EventSet& candidateHistory)
+    {
 
       UnfoldingEvent e;
 
@@ -363,17 +342,18 @@ namespace simgrid {
         EventSet temp1 = temp;
         temp1.insert(preEvt);
         bool chk = true;
-        // create a new event if all event in the history candidate has the transition which is dependent with t
+        // create a new event if all event in the history candidate have transitions which are dependent with t
 
         for (auto evt : temp1) {
           if (not evt.transition->isDependent(t)) {	chk = false; break; }
         }
 
-        if(chk) {			e = new UnfoldingEvent(++nb_events, t, temp1); //  FIXME:  be careful value of nb_events
-        result.insert(e); 	}
+        if (chk) {
+          e = new UnfoldingEvent(++nb_events, t, temp1); //  FIXME:  be careful value of nb_events
+          result.insert(e); 	}
         return;
       } else {
-        EventSet::iterator it = candidateHistory.begin();
+        std::set<UnfoldingEvent> it = candidateHistory.begin();
         UnfoldingEvent a = *it;
         EventSet t1, t2, t3, t4;
         t1 = temp;
@@ -396,11 +376,12 @@ namespace simgrid {
       EventSet t = C;
       t= t.makeUnion(t,tempJ);
       // checking C v U is a configuration?
+
       if (t.isConfig()) {
-        int count = 0;
-        for (auto it : D)
-          for (auto it1 : t)
-            if (it.isImmediateConflict(it1) && U.contains(it1) {
+        size_t count = 0;
+        for (auto it : D.events_)
+          for (auto it1 : t.events_)
+            if (it.isImmediateConflict(it1) && U.contains(it1)) {
               count++;
               break;
             }
@@ -414,7 +395,7 @@ namespace simgrid {
 
         return;
       } else {
-        EventSet::iterator it = U.begin();
+        std::set<UnfoldingEvent> it = U.begin();
         UnfoldingEvent a = *it;
         EventSet t1, t2, t3, t4;
         t1 = tempJ;
@@ -433,21 +414,21 @@ namespace simgrid {
       EventSet unionSet, res, res1;
       unionSet = unionSet.makeUnion(C, D);
 
-
+      // building Qcdu
       for (auto e1 : U)
         for (auto e2 : unionSet) {
           if (e1.isImmediateConflict(e2))
+            // add e1 which is immediate conflict with one event in C u D to res
             res.insert(e1);
           break;
         }
 
       for (auto e1 : res) {
         EventSet h = e1.getHistory();
-        res = res.insert(h.begin(), h.end());
+        res        = res.makeUnion(res, h);
       }
 
-      res = res.unionSet(res, unionSet);
-
+      res = res.makeUnion(res, unionSet);
       // move e from U to G if the condition is satisfied
       if (not res.contains(e)) {
         U.erase(e);
@@ -455,12 +436,13 @@ namespace simgrid {
       }
 
       // move history of ê from U to G
-      for (auto e1 : U)
+      for (auto e1 : U.events_)
+
         if (e1.isImmediateConflict(e)) {
           EventSet h = e1.getHistory();
           h.insert(e1);
-          for (auto e2 : h)
-            if (not res.contains(e2) {
+          for (auto e2 : h.events_)
+            if (not res.contains(e2)) {
               U.erase(e2);
               G.insert(e2);
             }
