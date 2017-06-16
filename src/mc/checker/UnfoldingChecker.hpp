@@ -64,7 +64,7 @@ public:
   EventSet getHistory() const;
   bool isConflict(UnfoldingEvent otherEvent);
   bool isImmediateConflict(UnfoldingEvent other);
-  bool conflictWithConfig(EventSet config);
+  bool conflictWithConfig(Configuration config);
 
   void getEnabledTransition(std::set<Transition*>* whereto);
   void UnfoldingEvent::execute();
